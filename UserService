@@ -1,0 +1,145 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using TeamManagerBot.Models;
+
+namespace TeamManagerBot.Services
+{
+    public interface IUserService
+    {
+        Task<User?> GetOrCreateUserAsync(long telegramId, string username, string firstName, string? lastName);
+        Task<bool> IsAdminAsync(long telegramId);
+        Task<UserRole> GetUserRoleAsync(long telegramId);
+        Task<List<User>> GetAllUsersAsync();
+        Task<bool> UpdateUserRoleAsync(long telegramId, UserRole newRole);
+        Task<User?> GetUserByTelegramIdAsync(long telegramId);
+        Task<bool> UpdateUserLastActiveAsync(long telegramId);
+        Task<int> GetUsersCountAsync();
+    }
+
+    public class UserService : IUserService
+    {
+        private readonly ApplicationDbContext _context;
+        private readonly ILogger<UserService> _logger;
+        private readonly IConfiguration _configuration;
+
+        public UserService(ApplicationDbContext context, ILogger<UserService> logger, IConfiguration configuration)
+        {
+            _context = context;
+            _logger = logger;
+            _configuration = configuration;
+        }
+
+        public async Task<User?> GetOrCreateUserAsync(long telegramId, string username, string firstName, string? lastName)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(telegramId);
+
+                if (user == null)
+                {
+                    var adminIds = _configuration.GetSection("BotConfiguration:AdminIds").Get<long[]>() ?? Array.Empty<long>();
+                    var isAdmin = adminIds.Contains(telegramId);
+
+                    user = new User
+                    {
+                        TelegramId = telegramId,
+                        Username = username,
+                        FirstName = firstName,
+                        LastName = lastName,
+                        Role = isAdmin ? UserRole.Admin : UserRole.Member,
+                        CreatedAt = DateTime.UtcNow,
+                        LastActiveAt = DateTime.UtcNow
+                    };
+
+                    _context.Users.Add(user);
+                    await _context.SaveChangesAsync();
+
+                    _logger.LogInformation("Created new user: {Username} ({TelegramId})", username, telegramId);
+                }
+                else
+                {
+                    // Обновляем данные пользователя
+                    user.Username = username;
+                    user.FirstName = firstName;
+                    user.LastName = lastName;
+                    user.LastActiveAt = DateTime.UtcNow;
+
+                    await _context.SaveChangesAsync();
+                }
+
+                return user;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in GetOrCreateUserAsync for user {TelegramId}", telegramId);
+                return null;
+            }
+        }
+
+        public async Task<bool> IsAdminAsync(long telegramId)
+        {
+            var user = await _context.Users.FindAsync(telegramId);
+            return user?.Role == UserRole.Admin;
+        }
+
+        public async Task<UserRole> GetUserRoleAsync(long telegramId)
+        {
+            var user = await _context.Users.FindAsync(telegramId);
+            return user?.Role ?? UserRole.Member;
+        }
+
+        public async Task<List<User>> GetAllUsersAsync()
+        {
+            return await _context.Users
+                .OrderBy(u => u.FirstName)
+                .ToListAsync();
+        }
+
+        public async Task<bool> UpdateUserRoleAsync(long telegramId, UserRole newRole)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(telegramId);
+                if (user == null) return false;
+
+                user.Role = newRole;
+                await _context.SaveChangesAsync();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating user role for {TelegramId}", telegramId);
+                return false;
+            }
+        }
+
+        public async Task<User?> GetUserByTelegramIdAsync(long telegramId)
+        {
+            return await _context.Users.FindAsync(telegramId);
+        }
+
+        public async Task<bool> UpdateUserLastActiveAsync(long telegramId)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(telegramId);
+                if (user == null) return false;
+
+                user.LastActiveAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating user last active for {TelegramId}", telegramId);
+                return false;
+            }
+        }
+
+        public async Task<int> GetUsersCountAsync()
+        {
+            return await _context.Users.CountAsync();
+        }
+    }
+}
