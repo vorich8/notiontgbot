@@ -1,0 +1,452 @@
+// Models.cs
+using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace TeamManagerBot.Models
+{
+    // Перечисления
+    public enum UserRole
+    {
+        Member = 0,
+        Admin = 1
+    }
+
+    public enum ProjectStatus
+    {
+        Pending = 0,    // 🟡 Предстоит
+        InProgress = 1, // 🟠 В работе
+        Completed = 2   // ✅ Готово
+    }
+
+    // ИЗМЕНИЛ НАЗВАНИЕ - чтобы избежать конфликта с System.Threading.Tasks.TaskStatus
+    public enum TeamTaskStatus
+    {
+        Active = 0,
+        Completed = 1,
+        Archived = 2
+    }
+
+    public enum FinancialRecordType
+    {
+        Income = 0,     // Доход
+        Expense = 1,    // Расход
+        Deposit = 2,    // Депозит
+        Commission = 3, // Комиссия
+        Investment = 4  // Вклад
+    }
+
+    public enum AdvertisementType
+    {
+        ContentPlan = 0,
+        AdCampaign = 1
+    }
+
+    public enum AdvertisementStatus
+    {
+        Planned = 0,
+        InProgress = 1,
+        Completed = 2,
+        Archived = 3
+    }
+
+    // Пользователь
+    public class User
+    {
+        [Key]
+        public long TelegramId { get; set; }
+
+        [Required, MaxLength(100)]
+        public string Username { get; set; } = string.Empty;
+
+        [Required, MaxLength(100)]
+        public string FirstName { get; set; } = string.Empty;
+
+        [MaxLength(100)]
+        public string? LastName { get; set; }
+
+        [Required]
+        public UserRole Role { get; set; } = UserRole.Member;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? LastActiveAt { get; set; }
+
+        // Навигационные свойства
+        public virtual ICollection<TeamTask> Tasks { get; set; } = new List<TeamTask>();
+        public virtual ICollection<FinancialRecord> FinancialRecords { get; set; } = new List<FinancialRecord>();
+        public virtual ICollection<Project> CreatedProjects { get; set; } = new List<Project>();
+        public virtual ICollection<StatusUpdate> StatusUpdates { get; set; } = new List<StatusUpdate>();
+    }
+
+    // Проект
+    public class Project
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required, MaxLength(200)]
+        public string Name { get; set; } = string.Empty;
+
+        [MaxLength(1000)]
+        public string? Description { get; set; }
+
+        [Required]
+        public ProjectStatus Status { get; set; } = ProjectStatus.Pending;
+
+        [MaxLength(500)]
+        public string? Link { get; set; }
+
+        [Required]
+        public long CreatedByUserId { get; set; }
+
+        [ForeignKey("CreatedByUserId")]
+        public virtual User CreatedBy { get; set; } = null!;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? UpdatedAt { get; set; }
+
+        // Навигационные свойства
+        public virtual ICollection<TeamTask> Tasks { get; set; } = new List<TeamTask>();
+        public virtual ICollection<StatusUpdate> StatusUpdates { get; set; } = new List<StatusUpdate>();
+        public virtual ICollection<ProjectDocumentation> Documentations { get; set; } = new List<ProjectDocumentation>();
+    }
+
+    // Задача
+    public class TeamTask
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required, MaxLength(200)]
+        public string Title { get; set; } = string.Empty;
+
+        [MaxLength(1000)]
+        public string? Description { get; set; }
+
+        [Required]
+        public TeamTaskStatus Status { get; set; } = TeamTaskStatus.Active;
+
+        public DateTime? DueDate { get; set; }
+        public DateTime? CompletedAt { get; set; }
+
+        [Required]
+        public int ProjectId { get; set; }
+
+        [ForeignKey("ProjectId")]
+        public virtual Project Project { get; set; } = null!;
+
+        [Required]
+        public long AssignedToUserId { get; set; }
+
+        [ForeignKey("AssignedToUserId")]
+        public virtual User AssignedTo { get; set; } = null!;
+
+        public long? CreatedByUserId { get; set; }
+
+        [ForeignKey("CreatedByUserId")]
+        public virtual User? CreatedBy { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? UpdatedAt { get; set; }
+    }
+
+    // Финансовая запись
+    public class FinancialRecord
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required]
+        public FinancialRecordType Type { get; set; }
+
+        [Required, MaxLength(100)]
+        public string Category { get; set; } = string.Empty;
+
+        [Required, MaxLength(200)]
+        public string Description { get; set; } = string.Empty;
+
+        [Required, Column(TypeName = "decimal(18,2)")]
+        public decimal Amount { get; set; }
+
+        [MaxLength(3)]
+        public string Currency { get; set; } = "USD";
+
+        [MaxLength(100)]
+        public string? Source { get; set; }
+
+        public DateTime TransactionDate { get; set; } = DateTime.UtcNow;
+
+        public long? UserId { get; set; }
+
+        [ForeignKey("UserId")]
+        public virtual User? User { get; set; }
+
+        public int? ProjectId { get; set; }
+
+        [ForeignKey("ProjectId")]
+        public virtual Project? Project { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    // Контакт
+    public class TeamContact
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required, MaxLength(100)]
+        public string TelegramUsername { get; set; } = string.Empty;
+
+        [MaxLength(100)]
+        public string? FullName { get; set; }
+
+        [MaxLength(50)]
+        public string? Nickname { get; set; }
+
+        public byte[]? EncryptedPassportData { get; set; }
+        public byte[]? EncryptedPhoneNumber { get; set; }
+        public byte[]? EncryptedEmail { get; set; }
+        public byte[]? EncryptedAddress { get; set; }
+
+        [MaxLength(100)]
+        public string? Tags { get; set; }
+
+        [MaxLength(50)]
+        public string? ContactType { get; set; } = "Доп";
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? UpdatedAt { get; set; }
+    }
+
+    // Статус проекта
+    public class StatusUpdate
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required]
+        public int ProjectId { get; set; }
+
+        [ForeignKey("ProjectId")]
+        public virtual Project Project { get; set; } = null!;
+
+        [Required, MaxLength(2000)]
+        public string Text { get; set; } = string.Empty;
+
+        [MaxLength(500)]
+        public string? Link { get; set; }
+
+        public long CreatedByUserId { get; set; }
+
+        [ForeignKey("CreatedByUserId")]
+        public virtual User CreatedBy { get; set; } = null!;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    // Документация проекта
+    public class ProjectDocumentation
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required]
+        public int ProjectId { get; set; }
+
+        [ForeignKey("ProjectId")]
+        public virtual Project Project { get; set; } = null!;
+
+        [Required, MaxLength(200)]
+        public string Title { get; set; } = string.Empty;
+
+        [Required]
+        public string Content { get; set; } = string.Empty;
+
+        [MaxLength(50)]
+        public string DocumentType { get; set; } = "manual";
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? UpdatedAt { get; set; }
+
+        public long CreatedByUserId { get; set; }
+
+        [ForeignKey("CreatedByUserId")]
+        public virtual User CreatedBy { get; set; } = null!;
+    }
+
+    // Рекламная кампания
+    public class Advertisement
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required, MaxLength(200)]
+        public string Title { get; set; } = string.Empty;
+
+        [Required]
+        public AdvertisementType Type { get; set; }
+
+        [MaxLength(1000)]
+        public string? Goal { get; set; }
+
+        [MaxLength(2000)]
+        public string? ContentStrategy { get; set; }
+
+        [MaxLength(2000)]
+        public string? PostTemplates { get; set; }
+
+        public DateTime? StartDate { get; set; }
+        public DateTime? EndDate { get; set; }
+
+        [MaxLength(500)]
+        public string? Schedule { get; set; }
+
+        [Required]
+        public AdvertisementStatus Status { get; set; } = AdvertisementStatus.Planned;
+
+        public decimal? Budget { get; set; }
+
+        public long CreatedByUserId { get; set; }
+
+        [ForeignKey("CreatedByUserId")]
+        public virtual User CreatedBy { get; set; } = null!;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? UpdatedAt { get; set; }
+    }
+
+    // Вспомогательные классы
+    public class TeamContactWithDecryptedData
+    {
+        public TeamContact Contact { get; set; } = null!;
+        public string? PassportData { get; set; }
+        public string? PhoneNumber { get; set; }
+        public string? Email { get; set; }
+        public string? Address { get; set; }
+    }
+
+    public class PaginatedResult<T>
+    {
+        public List<T> Items { get; set; } = new();
+        public int Page { get; set; }
+        public int PageSize { get; set; }
+        public int TotalCount { get; set; }
+        public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);
+
+        public PaginatedResult(List<T> items, int page, int pageSize, int totalCount)
+        {
+            Items = items;
+            Page = page;
+            PageSize = pageSize;
+            TotalCount = totalCount;
+        }
+
+        public PaginatedResult()
+        {
+        }
+    }
+
+    public class CategoryStat
+    {
+        public string Category { get; set; } = string.Empty;
+        public decimal Total { get; set; }
+        public int Count { get; set; }
+    }
+
+    public class FinanceStatistics
+    {
+        public decimal TotalIncome { get; set; }
+        public decimal TotalExpenses { get; set; }
+        public decimal Balance { get; set; }
+        public List<CategoryStat> IncomeByCategory { get; set; } = new();
+        public List<CategoryStat> ExpensesByCategory { get; set; } = new();
+        public decimal MonthlyIncome { get; set; }
+        public decimal MonthlyExpenses { get; set; }
+        public Dictionary<string, decimal> MonthlyTrend { get; set; } = new();
+    }
+
+    public class KpiStatistics
+    {
+        public int ActiveTasks { get; set; }
+        public int CompletedTasks { get; set; }
+        public int TotalTasks { get; set; }
+        public decimal TaskCompletionRate { get; set; }
+        public int ActiveProjects { get; set; }
+        public int CompletedProjects { get; set; }
+        public decimal ProjectCompletionRate { get; set; }
+        public decimal TotalRevenue { get; set; }
+        public decimal TotalProfit { get; set; }
+        public Dictionary<string, decimal> UserPerformance { get; set; } = new();
+    }
+
+    // Контекст БД
+    public class ApplicationDbContext : DbContext
+    {
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+            : base(options)
+        {
+        }
+
+        public DbSet<User> Users { get; set; }
+        public DbSet<Project> Projects { get; set; }
+        public DbSet<TeamTask> Tasks { get; set; }
+        public DbSet<FinancialRecord> FinancialRecords { get; set; }
+        public DbSet<TeamContact> Contacts { get; set; }
+        public DbSet<StatusUpdate> StatusUpdates { get; set; }
+        public DbSet<ProjectDocumentation> ProjectDocumentations { get; set; }
+        public DbSet<Advertisement> Advertisements { get; set; }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+            // Индексы
+            modelBuilder.Entity<User>()
+                .HasIndex(u => u.Username);
+
+            modelBuilder.Entity<Project>()
+                .HasIndex(p => p.Status);
+
+            modelBuilder.Entity<TeamTask>()
+                .HasIndex(t => t.Status);
+
+            modelBuilder.Entity<TeamTask>()
+                .HasIndex(t => t.AssignedToUserId);
+
+            modelBuilder.Entity<FinancialRecord>()
+                .HasIndex(f => f.TransactionDate);
+
+            modelBuilder.Entity<FinancialRecord>()
+                .HasIndex(f => f.Type);
+
+            modelBuilder.Entity<TeamContact>()
+                .HasIndex(c => c.TelegramUsername);
+
+            // Отношения
+            modelBuilder.Entity<Project>()
+                .HasOne(p => p.CreatedBy)
+                .WithMany(u => u.CreatedProjects)
+                .HasForeignKey(p => p.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<TeamTask>()
+                .HasOne(t => t.AssignedTo)
+                .WithMany(u => u.Tasks)
+                .HasForeignKey(t => t.AssignedToUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<TeamTask>()
+                .HasOne(t => t.CreatedBy)
+                .WithMany()
+                .HasForeignKey(t => t.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<StatusUpdate>()
+                .HasOne(su => su.CreatedBy)
+                .WithMany(u => u.StatusUpdates)
+                .HasForeignKey(su => su.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        }
+    }
+}
