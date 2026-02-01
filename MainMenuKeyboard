@@ -1,0 +1,239 @@
+using Telegram.Bot.Types.ReplyMarkups;
+
+namespace TeamManagerBot.Keyboards
+{
+    public static class MainMenuKeyboard
+    {
+        public static ReplyKeyboardMarkup GetMainMenu(bool isAdmin)
+        {
+            var rows = new List<KeyboardButton[]>
+            {
+                new KeyboardButton[] { "📂 Проекты", "✅ Задачи" },
+                new KeyboardButton[] { "💰 Бухгалтерия", "📈 KPI" },
+                new KeyboardButton[] { "👤 Контакты", "📊 Статусы" },
+                new KeyboardButton[] { "🗃️ База данных", "📢 Реклама" }
+            };
+
+            if (isAdmin)
+            {
+                rows.Add(new KeyboardButton[] { "⚙️ Настройки" });
+            }
+
+            rows.Add(new KeyboardButton[] { "◀️ Назад в меню" });
+
+            return new ReplyKeyboardMarkup(rows)
+            {
+                ResizeKeyboard = true,
+                OneTimeKeyboard = false
+            };
+        }
+
+        public static InlineKeyboardMarkup GetProjectsMenu()
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("➕ Создать проект", CallbackData.CreateProject) },
+                new() { InlineKeyboardButton.WithCallbackData("📋 Список проектов", CallbackData.ProjectsList) },
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", CallbackData.BackToMain) }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetTasksMenu(bool isAdmin)
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("➕ Создать задачу", CallbackData.TasksCreate) },
+                new() { InlineKeyboardButton.WithCallbackData("📋 Список задач", CallbackData.TasksList) },
+                new() { InlineKeyboardButton.WithCallbackData("👤 Мои задачи", CallbackData.TasksMy) },
+                new() { InlineKeyboardButton.WithCallbackData("📁 Архив задач", CallbackData.TasksArchive) }
+            };
+
+            if (isAdmin)
+            {
+                buttons.Add(new List<InlineKeyboardButton>
+                {
+                    InlineKeyboardButton.WithCallbackData("⚙️ Настройки участников", CallbackData.TasksSettings)
+                });
+            }
+
+            buttons.Add(new List<InlineKeyboardButton>
+            {
+                InlineKeyboardButton.WithCallbackData("◀️ Назад", CallbackData.BackToMain)
+            });
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetStatusesMenu()
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("📝 Написать статус", CallbackData.StatusWrite) },
+                new() { InlineKeyboardButton.WithCallbackData("🗺️ Статусная доска", CallbackData.StatusBoard) },
+                new() { InlineKeyboardButton.WithCallbackData("📈 Прогресс", CallbackData.StatusProgress) },
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", CallbackData.BackToMain) }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetAdvertisementMenu()
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("# Контент план", CallbackData.AdContentPlan) },
+                new() { InlineKeyboardButton.WithCallbackData("📢 Рекламный план", CallbackData.AdCampaignPlan) },
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", CallbackData.BackToMain) }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetContactsMenu()
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("➕ Добавить контакт", CallbackData.ContactsAdd) },
+                new() { InlineKeyboardButton.WithCallbackData("🔍 Поиск", CallbackData.ContactsSearch) },
+                new() { InlineKeyboardButton.WithCallbackData("📋 Список", CallbackData.ContactsList) },
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", CallbackData.BackToMain) }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetDatabaseMenu()
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("👤 Контакты", CallbackData.ContactsMenu) },
+                new() { InlineKeyboardButton.WithCallbackData("📦 Дропы", CallbackData.DropsMenu) },
+                new() { InlineKeyboardButton.WithCallbackData("📖 Мануалы", CallbackData.ManualsMenu) },
+                new() { InlineKeyboardButton.WithCallbackData("📊 Отчёты", CallbackData.ReportsMenu) },
+                new() { InlineKeyboardButton.WithCallbackData("📋 Документация проектов", CallbackData.ProjectDocsMenu) },
+                new() { InlineKeyboardButton.WithCallbackData("📢 Док-ция по рекламе", CallbackData.AdDocsMenu) },
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", CallbackData.BackToMain) }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetFinanceMenu()
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("💵 Депозит", CallbackData.FinanceDeposit) },
+                new() { InlineKeyboardButton.WithCallbackData("📊 Комиссия", CallbackData.FinanceCommission) },
+                new() { InlineKeyboardButton.WithCallbackData("💰 Доходы", CallbackData.FinanceIncomes) },
+                new() { InlineKeyboardButton.WithCallbackData("👥 Вклады участников", CallbackData.FinanceInvestments) },
+                new() { InlineKeyboardButton.WithCallbackData("💸 Крипти", CallbackData.FinanceCrypto) },
+                new() { InlineKeyboardButton.WithCallbackData("📉 Траты", CallbackData.FinanceExpenses) },
+                new() { InlineKeyboardButton.WithCallbackData("🏦 ФИ (Fast Invest)", CallbackData.FinanceFi) },
+                new() { InlineKeyboardButton.WithCallbackData("⚙️ Настройки категорий", CallbackData.FinanceCategories) },
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", CallbackData.BackToMain) }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetKPIMenu()
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("📊 Задачи за неделю", CallbackData.KpiTasksWeek) },
+                new() { InlineKeyboardButton.WithCallbackData("💰 Финансы за месяц", CallbackData.KpiFinanceMonth) },
+                new() { InlineKeyboardButton.WithCallbackData("📈 Прогресс проектов", CallbackData.KpiProjects) },
+                new() { InlineKeyboardButton.WithCallbackData("👥 Активность", CallbackData.KpiActivity) },
+                new() { InlineKeyboardButton.WithCallbackData("📊 Общий KPI", CallbackData.KpiOverall) },
+                new() { InlineKeyboardButton.WithCallbackData("👥 KPI команды", CallbackData.KpiTeam) },
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", CallbackData.BackToMain) }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetSettingsMenu()
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("👥 Пользователи", CallbackData.SettingsUsers) },
+                new() { InlineKeyboardButton.WithCallbackData("🔐 Безопасность", CallbackData.SettingsSecurity) },
+                new() { InlineKeyboardButton.WithCallbackData("📊 Отчеты", CallbackData.SettingsReports) },
+                new() { InlineKeyboardButton.WithCallbackData("💾 База данных", CallbackData.SettingsDatabase) },
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", CallbackData.BackToMain) }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetProjectActions(int projectId)
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("✏️ Редактировать", $"{CallbackData.EditProjectPrefix}{projectId}") },
+                new() { InlineKeyboardButton.WithCallbackData("📊 Сменить статус", $"{CallbackData.ChangeStatusPrefix}{projectId}") },
+                new() { InlineKeyboardButton.WithCallbackData("🗑️ Удалить", $"{CallbackData.DeleteProjectPrefix}{projectId}") },
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", CallbackData.BackToProjects) }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetProjectStatusChange(int projectId)
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("🟡 Предстоит", $"{CallbackData.StatusPendingPrefix}{projectId}") },
+                new() { InlineKeyboardButton.WithCallbackData("🟠 В работе", $"{CallbackData.StatusInProgressPrefix}{projectId}") },
+                new() { InlineKeyboardButton.WithCallbackData("✅ Готово", $"{CallbackData.StatusCompletedPrefix}{projectId}") },
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", $"{CallbackData.ProjectPrefix}{projectId}") }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetBackButton(string callbackData = CallbackData.BackToMain)
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", callbackData) }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetIncomeCategories()
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("💼 Продажи", "income_category_sales") },
+                new() { InlineKeyboardButton.WithCallbackData("🤝 Партнерки", "income_category_partnership") },
+                new() { InlineKeyboardButton.WithCallbackData("📊 Инвестиции", "income_category_investments") },
+                new() { InlineKeyboardButton.WithCallbackData("💻 Фриланс", "income_category_freelance") },
+                new() { InlineKeyboardButton.WithCallbackData("📈 Трейдинг", "income_category_trading") },
+                new() { InlineKeyboardButton.WithCallbackData("🎁 Прочее", "income_category_other") },
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", CallbackData.FinanceIncomes) }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+
+        public static InlineKeyboardMarkup GetExpenseCategories()
+        {
+            var buttons = new List<List<InlineKeyboardButton>>
+            {
+                new() { InlineKeyboardButton.WithCallbackData("🏢 Аренда", "expense_category_rent") },
+                new() { InlineKeyboardButton.WithCallbackData("💻 Оборудование", "expense_category_equipment") },
+                new() { InlineKeyboardButton.WithCallbackData("📱 Софт", "expense_category_software") },
+                new() { InlineKeyboardButton.WithCallbackData("📢 Реклама", "expense_category_advertising") },
+                new() { InlineKeyboardButton.WithCallbackData("👥 Зарплаты", "expense_category_salaries") },
+                new() { InlineKeyboardButton.WithCallbackData("🍕 Прочее", "expense_category_other") },
+                new() { InlineKeyboardButton.WithCallbackData("◀️ Назад", CallbackData.FinanceExpenses) }
+            };
+
+            return new InlineKeyboardMarkup(buttons);
+        }
+    }
+}
