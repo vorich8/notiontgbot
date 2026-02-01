@@ -1,0 +1,39 @@
+using TeamManagerBot.Models;
+
+namespace TeamManagerBot.Services
+{
+    public interface IContactService
+    {
+        // Основные CRUD операции
+        Task<TeamContact?> CreateContactAsync(TeamContact contact, string? passportData, string? phoneNumber,
+                                             string? email, string? address);
+        Task<TeamContact?> CreateSimpleContactAsync(string telegramUsername, string? fullName = null,
+                                                   string? contactType = null, string? tags = null);
+        Task<TeamContact?> GetContactAsync(int contactId);
+        Task<TeamContactWithDecryptedData?> GetContactWithDecryptedDataAsync(int contactId);
+        Task<bool> UpdateContactAsync(TeamContact contact);
+        Task<bool> UpdateContactEncryptedDataAsync(int contactId, string? passportData = null,
+                                                  string? phoneNumber = null, string? email = null,
+                                                  string? address = null);
+        Task<bool> DeleteContactAsync(int contactId);
+
+        // Поиск и получение
+        Task<List<TeamContact>> GetAllContactsAsync();
+        Task<List<TeamContact>> SearchContactsAsync(string searchTerm);
+        Task<List<TeamContact>> GetContactsByTypeAsync(string contactType);
+
+        // Пагинация
+        Task<PaginatedResult<TeamContact>> GetAllContactsPaginatedAsync(int page = 1, int pageSize = 20);
+        Task<PaginatedResult<TeamContact>> SearchContactsPaginatedAsync(string searchTerm, int page = 1, int pageSize = 20);
+
+        // Дешифровка данных
+        Task<string?> GetDecryptedPassportDataAsync(int contactId);
+        Task<string?> GetDecryptedPhoneNumberAsync(int contactId);
+        Task<string?> GetDecryptedEmailAsync(int contactId);
+        Task<string?> GetDecryptedAddressAsync(int contactId);
+
+        // Статистика и валидация
+        Task<int> GetContactsCountAsync();
+        Task<bool> ContactExistsAsync(string telegramUsername);
+    }
+}
