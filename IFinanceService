@@ -1,0 +1,34 @@
+// IFinanceService.cs 
+using TeamManagerBot.Models;
+
+namespace TeamManagerBot.Services
+{
+    public interface IFinanceService
+    {
+        Task<FinancialRecord?> CreateFinancialRecordAsync(FinancialRecordType type, string category,
+            string description, decimal amount, string currency, string? source,
+            long? userId, int? projectId);
+
+        Task<List<FinancialRecord>> GetAllRecordsAsync();
+        Task<List<FinancialRecord>> GetRecordsByTypeAsync(FinancialRecordType type);
+        Task<List<FinancialRecord>> GetRecordsByCategoryAsync(string category);
+        Task<List<FinancialRecord>> GetRecordsByDateRangeAsync(DateTime startDate, DateTime endDate);
+
+        Task<FinancialRecord?> GetRecordAsync(int recordId);
+        Task<bool> UpdateRecordAsync(FinancialRecord record);
+        Task<bool> DeleteRecordAsync(int recordId);
+
+        Task<FinanceStatistics> GetFinanceStatisticsAsync(DateTime? startDate = null, DateTime? endDate = null);
+        Task<decimal> GetTotalBalanceAsync();
+        Task<decimal> GetTotalIncomeAsync(DateTime? startDate = null, DateTime? endDate = null);
+        Task<decimal> GetTotalExpensesAsync(DateTime? startDate = null, DateTime? endDate = null);
+
+        Task<List<CategoryStat>> GetIncomeByCategoryAsync(DateTime? startDate = null, DateTime? endDate = null);
+        Task<List<CategoryStat>> GetExpensesByCategoryAsync(DateTime? startDate = null, DateTime? endDate = null);
+
+        Task<Dictionary<string, decimal>> GetMonthlyTrendAsync(FinancialRecordType type, int months = 6);
+
+        Task<bool> RecordExistsAsync(int recordId);
+        Task<int> GetRecordsCountAsync();
+    }
+}
