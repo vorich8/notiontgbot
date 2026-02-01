@@ -1,0 +1,13 @@
+namespace TeamManagerBot.Handlers
+{
+    public class UserState
+    {
+        public string CurrentAction { get; set; } = string.Empty;
+        public int Step { get; set; } = 1;
+        public int? ProjectId { get; set; }
+        public int? TaskId { get; set; }
+        public int? ContactId { get; set; }
+        public int? FinanceRecordId { get; set; }
+        public Dictionary<string, object?> Data { get; set; } = new();
+    }
+}
