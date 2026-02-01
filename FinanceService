@@ -1,0 +1,369 @@
+// FinanceService.cs - НОВЫЙ ФАЙЛ
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using TeamManagerBot.Models;
+
+namespace TeamManagerBot.Services
+{
+    public class FinanceService : IFinanceService
+    {
+        private readonly ApplicationDbContext _context;
+        private readonly ILogger<FinanceService> _logger;
+
+        public FinanceService(ApplicationDbContext context, ILogger<FinanceService> logger)
+        {
+            _context = context;
+            _logger = logger;
+        }
+
+        public async Task<FinancialRecord?> CreateFinancialRecordAsync(FinancialRecordType type, string category,
+            string description, decimal amount, string currency, string? source,
+            long? userId, int? projectId)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+                var record = new FinancialRecord
+                {
+                    Type = type,
+                    Category = category.Trim(),
+                    Description = description.Trim(),
+                    Amount = amount,
+                    Currency = currency.ToUpper(),
+                    Source = source?.Trim(),
+                    UserId = userId,
+                    ProjectId = projectId,
+                    TransactionDate = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                // Проверяем пользователя если указан
+                if (userId.HasValue)
+                {
+                    var user = await _context.Users.FindAsync(userId.Value);
+                    if (user == null)
+                    {
+                        _logger.LogWarning("User {UserId} not found when creating financial record", userId.Value);
+                        await transaction.RollbackAsync();
+                        return null;
+                    }
+                }
+
+                // Проверяем проект если указан
+                if (projectId.HasValue)
+                {
+                    var project = await _context.Projects.FindAsync(projectId.Value);
+                    if (project == null)
+                    {
+                        _logger.LogWarning("Project {ProjectId} not found when creating financial record", projectId.Value);
+                        await transaction.RollbackAsync();
+                        return null;
+                    }
+                }
+
+                _context.FinancialRecords.Add(record);
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                _logger.LogInformation("Created financial record: {Type} {Amount} {Currency} - {Category}",
+                    type, amount, currency, category);
+                return record;
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                _logger.LogError(ex, "Error creating financial record: {Category} {Amount}", category, amount);
+                return null;
+            }
+        }
+
+        public async Task<List<FinancialRecord>> GetAllRecordsAsync()
+        {
+            return await _context.FinancialRecords
+                .Include(f => f.User)
+                .Include(f => f.Project)
+                .OrderByDescending(f => f.TransactionDate)
+                .Take(100)
+                .ToListAsync();
+        }
+
+        public async Task<List<FinancialRecord>> GetRecordsByTypeAsync(FinancialRecordType type)
+        {
+            return await _context.FinancialRecords
+                .Where(f => f.Type == type)
+                .Include(f => f.User)
+                .Include(f => f.Project)
+                .OrderByDescending(f => f.TransactionDate)
+                .Take(100)
+                .ToListAsync();
+        }
+
+        public async Task<List<FinancialRecord>> GetRecordsByCategoryAsync(string category)
+        {
+            return await _context.FinancialRecords
+                .Where(f => f.Category.ToLower() == category.ToLower())
+                .Include(f => f.User)
+                .Include(f => f.Project)
+                .OrderByDescending(f => f.TransactionDate)
+                .Take(100)
+                .ToListAsync();
+        }
+
+        public async Task<List<FinancialRecord>> GetRecordsByDateRangeAsync(DateTime startDate, DateTime endDate)
+        {
+            return await _context.FinancialRecords
+                .Where(f => f.TransactionDate >= startDate && f.TransactionDate <= endDate)
+                .Include(f => f.User)
+                .Include(f => f.Project)
+                .OrderByDescending(f => f.TransactionDate)
+                .Take(200)
+                .ToListAsync();
+        }
+
+        public async Task<FinancialRecord?> GetRecordAsync(int recordId)
+        {
+            return await _context.FinancialRecords
+                .Include(f => f.User)
+                .Include(f => f.Project)
+                .FirstOrDefaultAsync(f => f.Id == recordId);
+        }
+
+        public async Task<bool> UpdateRecordAsync(FinancialRecord record)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+                var entry = _context.Attach(record);
+                entry.State = EntityState.Modified;
+
+                // Не обновляем дату создания
+                entry.Property(x => x.CreatedAt).IsModified = false;
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                _logger.LogInformation("Updated financial record {RecordId}", record.Id);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                _logger.LogError(ex, "Error updating financial record {RecordId}", record.Id);
+                return false;
+            }
+        }
+
+        public async Task<bool> DeleteRecordAsync(int recordId)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+                var record = await _context.FinancialRecords.FindAsync(recordId);
+                if (record == null)
+                {
+                    _logger.LogWarning("Financial record {RecordId} not found for deletion", recordId);
+                    await transaction.RollbackAsync();
+                    return false;
+                }
+
+                _context.FinancialRecords.Remove(record);
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                _logger.LogInformation("Deleted financial record {RecordId}", recordId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                _logger.LogError(ex, "Error deleting financial record {RecordId}", recordId);
+                return false;
+            }
+        }
+
+        public async Task<FinanceStatistics> GetFinanceStatisticsAsync(DateTime? startDate = null, DateTime? endDate = null)
+        {
+            var start = startDate ?? DateTime.UtcNow.AddMonths(-1);
+            var end = endDate ?? DateTime.UtcNow;
+
+            var records = await _context.FinancialRecords
+                .Where(f => f.TransactionDate >= start && f.TransactionDate <= end)
+                .ToListAsync();
+
+            var incomeRecords = records.Where(r => r.Type == FinancialRecordType.Income).ToList();
+            var expenseRecords = records.Where(r => r.Type == FinancialRecordType.Expense).ToList();
+
+            var statistics = new FinanceStatistics
+            {
+                TotalIncome = incomeRecords.Sum(r => r.Amount),
+                TotalExpenses = expenseRecords.Sum(r => r.Amount),
+                Balance = incomeRecords.Sum(r => r.Amount) - expenseRecords.Sum(r => r.Amount),
+
+                IncomeByCategory = incomeRecords
+                    .GroupBy(r => r.Category)
+                    .Select(g => new CategoryStat
+                    {
+                        Category = g.Key,
+                        Total = g.Sum(r => r.Amount),
+                        Count = g.Count()
+                    })
+                    .OrderByDescending(c => c.Total)
+                    .ToList(),
+
+                ExpensesByCategory = expenseRecords
+                    .GroupBy(r => r.Category)
+                    .Select(g => new CategoryStat
+                    {
+                        Category = g.Key,
+                        Total = g.Sum(r => r.Amount),
+                        Count = g.Count()
+                    })
+                    .OrderByDescending(c => c.Total)
+                    .ToList(),
+
+                MonthlyIncome = incomeRecords.Where(r => r.TransactionDate.Month == DateTime.UtcNow.Month).Sum(r => r.Amount),
+                MonthlyExpenses = expenseRecords.Where(r => r.TransactionDate.Month == DateTime.UtcNow.Month).Sum(r => r.Amount)
+            };
+
+            // Рассчитываем тренд по месяцам
+            var months = new List<string>();
+            var monthlyData = new Dictionary<string, decimal>();
+
+            for (int i = 5; i >= 0; i--)
+            {
+                var month = DateTime.UtcNow.AddMonths(-i);
+                var monthKey = month.ToString("yyyy-MM");
+                var monthIncome = incomeRecords
+                    .Where(r => r.TransactionDate.Month == month.Month && r.TransactionDate.Year == month.Year)
+                    .Sum(r => r.Amount);
+
+                monthlyData[monthKey] = monthIncome;
+            }
+
+            statistics.MonthlyTrend = monthlyData;
+
+            return statistics;
+        }
+
+        public async Task<decimal> GetTotalBalanceAsync()
+        {
+            var incomes = await _context.FinancialRecords
+                .Where(f => f.Type == FinancialRecordType.Income)
+                .SumAsync(f => f.Amount);
+
+            var expenses = await _context.FinancialRecords
+                .Where(f => f.Type == FinancialRecordType.Expense)
+                .SumAsync(f => f.Amount);
+
+            return incomes - expenses;
+        }
+
+        public async Task<decimal> GetTotalIncomeAsync(DateTime? startDate = null, DateTime? endDate = null)
+        {
+            var query = _context.FinancialRecords.Where(f => f.Type == FinancialRecordType.Income);
+
+            if (startDate.HasValue)
+                query = query.Where(f => f.TransactionDate >= startDate.Value);
+
+            if (endDate.HasValue)
+                query = query.Where(f => f.TransactionDate <= endDate.Value);
+
+            return await query.SumAsync(f => f.Amount);
+        }
+
+        public async Task<decimal> GetTotalExpensesAsync(DateTime? startDate = null, DateTime? endDate = null)
+        {
+            var query = _context.FinancialRecords.Where(f => f.Type == FinancialRecordType.Expense);
+
+            if (startDate.HasValue)
+                query = query.Where(f => f.TransactionDate >= startDate.Value);
+
+            if (endDate.HasValue)
+                query = query.Where(f => f.TransactionDate <= endDate.Value);
+
+            return await query.SumAsync(f => f.Amount);
+        }
+
+        public async Task<List<CategoryStat>> GetIncomeByCategoryAsync(DateTime? startDate = null, DateTime? endDate = null)
+        {
+            var query = _context.FinancialRecords.Where(f => f.Type == FinancialRecordType.Income);
+
+            if (startDate.HasValue)
+                query = query.Where(f => f.TransactionDate >= startDate.Value);
+
+            if (endDate.HasValue)
+                query = query.Where(f => f.TransactionDate <= endDate.Value);
+
+            return await query
+                .GroupBy(f => f.Category)
+                .Select(g => new CategoryStat
+                {
+                    Category = g.Key,
+                    Total = g.Sum(f => f.Amount),
+                    Count = g.Count()
+                })
+                .OrderByDescending(c => c.Total)
+                .ToListAsync();
+        }
+
+        public async Task<List<CategoryStat>> GetExpensesByCategoryAsync(DateTime? startDate = null, DateTime? endDate = null)
+        {
+            var query = _context.FinancialRecords.Where(f => f.Type == FinancialRecordType.Expense);
+
+            if (startDate.HasValue)
+                query = query.Where(f => f.TransactionDate >= startDate.Value);
+
+            if (endDate.HasValue)
+                query = query.Where(f => f.TransactionDate <= endDate.Value);
+
+            return await query
+                .GroupBy(f => f.Category)
+                .Select(g => new CategoryStat
+                {
+                    Category = g.Key,
+                    Total = g.Sum(f => f.Amount),
+                    Count = g.Count()
+                })
+                .OrderByDescending(c => c.Total)
+                .ToListAsync();
+        }
+
+        public async Task<Dictionary<string, decimal>> GetMonthlyTrendAsync(FinancialRecordType type, int months = 6)
+        {
+            var endDate = DateTime.UtcNow;
+            var startDate = endDate.AddMonths(-months);
+
+            var records = await _context.FinancialRecords
+                .Where(f => f.Type == type && f.TransactionDate >= startDate && f.TransactionDate <= endDate)
+                .ToListAsync();
+
+            var monthlyData = new Dictionary<string, decimal>();
+
+            for (int i = 0; i < months; i++)
+            {
+                var month = startDate.AddMonths(i);
+                var monthKey = month.ToString("yyyy-MM");
+                var monthAmount = records
+                    .Where(r => r.TransactionDate.Month == month.Month && r.TransactionDate.Year == month.Year)
+                    .Sum(r => r.Amount);
+
+                monthlyData[monthKey] = monthAmount;
+            }
+
+            return monthlyData;
+        }
+
+        public async Task<bool> RecordExistsAsync(int recordId)
+        {
+            return await _context.FinancialRecords.AnyAsync(f => f.Id == recordId);
+        }
+
+        public async Task<int> GetRecordsCountAsync()
+        {
+            return await _context.FinancialRecords.CountAsync();
+        }
+    }
+}
