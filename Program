@@ -1,0 +1,442 @@
+// Program.cs
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using TeamManagerBot.Handlers;
+using TeamManagerBot.Models;
+using TeamManagerBot.Services;
+using Telegram.Bot;
+using Telegram.Bot.Polling;
+using Telegram.Bot.Types.Enums;
+
+namespace TeamManagerBot
+{
+    class Program
+    {
+        private static IHost? _host;
+        private static ILogger<Program>? _logger;
+        private static CancellationTokenSource _cts = new();
+
+        static async Task Main(string[] args)
+        {
+            // Обработка Ctrl+C
+            Console.CancelKeyPress += (sender, e) =>
+            {
+                Console.WriteLine("\n🛑 Получен сигнал остановки...");
+                _cts.Cancel();
+                e.Cancel = true;
+            };
+
+            try
+            {
+                Console.WriteLine("🚀 Запуск Team Manager Bot...");
+                Console.WriteLine("=".PadRight(50, '='));
+
+                // Создаем и настраиваем хост
+                _host = Host.CreateDefaultBuilder(args)
+                    .ConfigureServices((context, services) =>
+                    {
+                        ConfigureServices(services, context.Configuration);
+                    })
+                    .Build();
+
+                // Получаем логгер
+                _logger = _host.Services.GetRequiredService<ILogger<Program>>();
+
+                // Инициализация базы данных (ПЕРЕД запуском хоста!)
+                await InitializeDatabaseAsync();
+
+                // Настройка и запуск бота
+                await RunBotAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Критическая ошибка: {ex.Message}");
+                Console.WriteLine(ex.StackTrace);
+                if (_logger != null)
+                {
+                    _logger.LogCritical(ex, "Critical error during bot startup");
+                }
+            }
+            finally
+            {
+                Console.WriteLine("\n🛑 Остановка бота...");
+                await (_host?.StopAsync() ?? Task.CompletedTask);
+                _host?.Dispose();
+            }
+        }
+
+        private static void ConfigureServices(IServiceCollection services, IConfiguration configuration)
+        {
+            // Логирование
+            services.AddLogging(configure =>
+            {
+                configure.AddConsole();
+                configure.AddDebug();
+                configure.SetMinimumLevel(LogLevel.Information);
+                configure.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
+            });
+
+            // Конфигурация
+            services.AddSingleton(configuration);
+
+            // База данных - ВАЖНО: ConnectionString
+            var connectionString = configuration["BotConfiguration:ConnectionString"]
+                ?? "Data Source=TeamManager.db;Cache=Shared";
+
+            services.AddDbContext<ApplicationDbContext>(options =>
+            {
+                options.UseSqlite(connectionString);
+                options.EnableSensitiveDataLogging(false);
+                options.EnableDetailedErrors();
+            });
+
+            // Telegram Bot Client
+            var botToken = configuration["BotConfiguration:BotToken"];
+            if (string.IsNullOrEmpty(botToken))
+            {
+                throw new InvalidOperationException("Bot token is not configured. Please set BotConfiguration:BotToken in appsettings.json");
+            }
+
+            services.AddSingleton<ITelegramBotClient>(sp =>
+            {
+                var logger = sp.GetRequiredService<ILogger<Program>>();
+                logger.LogInformation("Creating Telegram Bot Client...");
+                return new TelegramBotClient(botToken);
+            });
+
+            // Менеджер состояний меню (Singleton)
+            services.AddSingleton<MenuStateManager>();
+
+            // Менеджер меню (Singleton)
+            services.AddSingleton<MenuManager>();
+
+            // Сервисы (Scoped)
+            services.AddScoped<IUserService, UserService>();
+            services.AddScoped<IProjectService, ProjectService>();
+            services.AddScoped<ITaskService, TaskService>();
+            services.AddScoped<IFinanceService, FinanceService>();
+            services.AddScoped<IContactService, ContactService>();
+            services.AddScoped<IEncryptionService, EncryptionService>();
+
+            // Обработчики (Scoped)
+            services.AddScoped<MainMenuHandler>();
+            services.AddScoped<CallbackQueryHandler>();
+            services.AddScoped<UpdateHandler>();
+
+            // Polling Receiver
+            services.AddSingleton<IUpdateHandler, UpdateHandler>();
+
+            // Receiver Service
+            services.AddHostedService<ReceiverService>();
+        }
+
+        private static async Task InitializeDatabaseAsync()
+        {
+            using var scope = _host!.Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                logger.LogInformation("Initializing database...");
+
+                // УДАЛИТЬ ВСЕ СУЩЕСТВУЮЩИЕ ТАБЛИЦЫ И СОЗДАТЬ ЗАНОВО
+                // Это для разработки. В продакшене используйте миграции.
+
+                // 1. Удаляем старую базу если существует
+                try
+                {
+                    logger.LogInformation("Deleting old database if exists...");
+                    await dbContext.Database.EnsureDeletedAsync();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Could not delete old database");
+                }
+
+                // 2. СОЗДАЕМ БАЗУ ДАННЫХ И ВСЕ ТАБЛИЦЫ
+                logger.LogInformation("Creating database and tables...");
+                var created = await dbContext.Database.EnsureCreatedAsync();
+
+                if (created)
+                {
+                    logger.LogInformation("✅ Database created successfully!");
+                    Console.WriteLine("✅ База данных создана успешно!");
+                }
+                else
+                {
+                    logger.LogInformation("Database already exists");
+                    Console.WriteLine("ℹ️ База данных уже существует");
+                }
+
+                // 3. Проверяем наличие администраторов
+                var adminIds = _host.Services.GetRequiredService<IConfiguration>()
+                    .GetSection("BotConfiguration:AdminIds").Get<long[]>() ?? Array.Empty<long>();
+
+                var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
+
+                // Создаем или обновляем администраторов
+                foreach (var adminId in adminIds)
+                {
+                    logger.LogInformation("Admin configured: {AdminId}", adminId);
+                }
+
+                // 4. Создаем тестовые данные для разработки (если база пуста)
+                if (await dbContext.Users.CountAsync() == 0)
+                {
+                    logger.LogInformation("Creating test data...");
+                    await CreateTestDataAsync(dbContext);
+                    logger.LogInformation("✅ Test data created successfully!");
+                    Console.WriteLine("✅ Тестовые данные созданы успешно!");
+                }
+
+                logger.LogInformation("✅ Database initialized successfully");
+                Console.WriteLine("✅ База данных инициализирована успешно");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "❌ Error initializing database");
+                Console.WriteLine($"❌ Ошибка инициализации базы данных: {ex.Message}");
+
+                // Пытаемся создать простую базу как последнюю попытку
+                try
+                {
+                    logger.LogWarning("Trying to create database with simple approach...");
+                    await dbContext.Database.EnsureCreatedAsync();
+                    logger.LogWarning("Database created with simple approach");
+                }
+                catch (Exception fallbackEx)
+                {
+                    logger.LogCritical(fallbackEx, "Failed to create database even with fallback");
+                    throw;
+                }
+            }
+        }
+
+        private static async Task CreateTestDataAsync(ApplicationDbContext dbContext)
+        {
+            try
+            {
+                // Создаем тестового администратора
+                var admin = new User
+                {
+                    TelegramId = 123456789,
+                    Username = "testadmin",
+                    FirstName = "Test",
+                    LastName = "Admin",
+                    Role = UserRole.Admin,
+                    CreatedAt = DateTime.UtcNow,
+                    LastActiveAt = DateTime.UtcNow
+                };
+
+                // Создаем тестового пользователя
+                var user = new User
+                {
+                    TelegramId = 987654321,
+                    Username = "testuser",
+                    FirstName = "Test",
+                    LastName = "User",
+                    Role = UserRole.Member,
+                    CreatedAt = DateTime.UtcNow,
+                    LastActiveAt = DateTime.UtcNow
+                };
+
+                dbContext.Users.Add(admin);
+                dbContext.Users.Add(user);
+                await dbContext.SaveChangesAsync();
+
+                // Создаем тестовый проект
+                var project = new Project
+                {
+                    Name = "Тестовый проект",
+                    Description = "Это тестовый проект для демонстрации функционала",
+                    Status = ProjectStatus.InProgress,
+                    CreatedByUserId = admin.TelegramId,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                dbContext.Projects.Add(project);
+                await dbContext.SaveChangesAsync();
+
+                // Создаем тестовые задачи
+                var tasks = new[]
+                {
+                    new TeamTask
+                    {
+                        Title = "Настроить окружение",
+                        Description = "Установить и настроить необходимое ПО",
+                        Status = TeamTaskStatus.Active,
+                        ProjectId = project.Id,
+                        AssignedToUserId = user.TelegramId,
+                        CreatedByUserId = admin.TelegramId,
+                        DueDate = DateTime.UtcNow.AddDays(3),
+                        CreatedAt = DateTime.UtcNow
+                    },
+                    new TeamTask
+                    {
+                        Title = "Создать базу данных",
+                        Description = "Разработать структуру базы данных",
+                        Status = TeamTaskStatus.Completed,
+                        ProjectId = project.Id,
+                        AssignedToUserId = admin.TelegramId,
+                        CreatedByUserId = admin.TelegramId,
+                        CompletedAt = DateTime.UtcNow.AddDays(-1),
+                        CreatedAt = DateTime.UtcNow.AddDays(-5)
+                    }
+                };
+
+                dbContext.Tasks.AddRange(tasks);
+                await dbContext.SaveChangesAsync();
+
+                // Создаем тестовые финансовые записи
+                var financialRecords = new[]
+                {
+                    new FinancialRecord
+                    {
+                        Type = FinancialRecordType.Income,
+                        Category = "Продажи",
+                        Description = "Продажа продукта",
+                        Amount = 1000,
+                        Currency = "USD",
+                        TransactionDate = DateTime.UtcNow.AddDays(-2),
+                        UserId = admin.TelegramId,
+                        CreatedAt = DateTime.UtcNow
+                    },
+                    new FinancialRecord
+                    {
+                        Type = FinancialRecordType.Expense,
+                        Category = "Оборудование",
+                        Description = "Покупка сервера",
+                        Amount = 500,
+                        Currency = "USD",
+                        TransactionDate = DateTime.UtcNow.AddDays(-1),
+                        UserId = admin.TelegramId,
+                        CreatedAt = DateTime.UtcNow
+                    }
+                };
+
+                dbContext.FinancialRecords.AddRange(financialRecords);
+                await dbContext.SaveChangesAsync();
+
+                // Создаем тестовый контакт
+                var contact = new TeamContact
+                {
+                    TelegramUsername = "testcontact",
+                    FullName = "Тестовый Контакт",
+                    ContactType = "Клиент",
+                    Tags = "тест,клиент",
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                dbContext.Contacts.Add(contact);
+                await dbContext.SaveChangesAsync();
+
+                // Создаем тестовый статус
+                var statusUpdate = new StatusUpdate
+                {
+                    ProjectId = project.Id,
+                    Text = "Проект успешно создан и готов к работе",
+                    CreatedByUserId = admin.TelegramId,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                dbContext.StatusUpdates.Add(statusUpdate);
+                await dbContext.SaveChangesAsync();
+
+                Console.WriteLine("✅ Тестовые данные созданы: 2 пользователя, 1 проект, 2 задачи, 2 финансовые записи, 1 контакт");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Ошибка при создании тестовых данных: {ex.Message}");
+                // Не бросаем исключение - можно продолжить без тестовых данных
+            }
+        }
+
+        private static async Task RunBotAsync()
+        {
+            using var scope = _host!.Services.CreateScope();
+            var botClient = scope.ServiceProvider.GetRequiredService<ITelegramBotClient>();
+            var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+            try
+            {
+                // Получаем информацию о боте
+                var me = await botClient.GetMe(_cts.Token);
+
+                Console.WriteLine($"🤖 Бот запущен: @{me.Username}");
+                Console.WriteLine($"📛 Имя бота: {me.FirstName}");
+                Console.WriteLine($"🆔 ID бота: {me.Id}");
+                Console.WriteLine("=".PadRight(50, '='));
+                Console.WriteLine("\n📱 Бот готов к работе! Отправьте /start в Telegram\n");
+                Console.WriteLine("📊 Доступные команды:");
+                Console.WriteLine("• /start - Запустить бота");
+                Console.WriteLine("• /help - Помощь");
+                Console.WriteLine("• Используйте кнопки меню для навигации\n");
+
+                logger.LogInformation("Bot started: @{Username} (ID: {Id})", me.Username, me.Id);
+
+                // Запускаем Receiver Service через хост
+                await _host.StartAsync(_cts.Token);
+
+                // Ждем отмены
+                await Task.Delay(Timeout.Infinite, _cts.Token);
+            }
+            catch (TaskCanceledException)
+            {
+                logger.LogInformation("Bot stopped by user request");
+                Console.WriteLine("\n👋 Бот остановлен");
+            }
+            catch (Exception ex)
+            {
+                logger.LogCritical(ex, "Bot stopped with error");
+                Console.WriteLine($"\n❌ Бот остановлен с ошибкой: {ex.Message}");
+                throw;
+            }
+        }
+    }
+
+    // Receiver Service для фоновой обработки обновлений
+    public class ReceiverService : BackgroundService
+    {
+        private readonly ITelegramBotClient _botClient;
+        private readonly IUpdateHandler _updateHandler;
+        private readonly ILogger<ReceiverService> _logger;
+
+        public ReceiverService(
+            ITelegramBotClient botClient,
+            IUpdateHandler updateHandler,
+            ILogger<ReceiverService> logger)
+        {
+            _botClient = botClient;
+            _updateHandler = updateHandler;
+            _logger = logger;
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            _logger.LogInformation("Starting polling...");
+
+            var receiverOptions = new ReceiverOptions
+            {
+                AllowedUpdates = new[] { UpdateType.Message, UpdateType.CallbackQuery },
+                DropPendingUpdates = true // Игнорируем старые обновления при старте
+            };
+
+            // Запускаем polling
+            await _botClient.ReceiveAsync(
+                updateHandler: _updateHandler,
+                receiverOptions: receiverOptions,
+                cancellationToken: stoppingToken);
+        }
+
+        public override async Task StopAsync(CancellationToken cancellationToken)
+        {
+            _logger.LogInformation("Stopping polling...");
+            await base.StopAsync(cancellationToken);
+        }
+    }
+}
