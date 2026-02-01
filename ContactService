@@ -1,0 +1,455 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using System.Security.Cryptography;
+using TeamManagerBot.Models;
+
+namespace TeamManagerBot.Services
+{
+    public class ContactService : IContactService
+    {
+        private readonly ApplicationDbContext _context;
+        private readonly IEncryptionService _encryptionService;
+        private readonly ILogger<ContactService> _logger;
+
+        public ContactService(
+            ApplicationDbContext context,
+            IEncryptionService encryptionService,
+            ILogger<ContactService> logger)
+        {
+            _context = context;
+            _encryptionService = encryptionService;
+            _logger = logger;
+        }
+
+        public async Task<TeamContact?> CreateContactAsync(
+            TeamContact contact,
+            string? passportData,
+            string? phoneNumber,
+            string? email,
+            string? address)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+                // Проверяем уникальность username
+                var existingContact = await _context.Contacts
+                    .FirstOrDefaultAsync(c => c.TelegramUsername.ToLower() == contact.TelegramUsername.ToLower());
+
+                if (existingContact != null)
+                {
+                    _logger.LogWarning("Contact with username {Username} already exists", contact.TelegramUsername);
+                    await transaction.RollbackAsync();
+                    return null;
+                }
+
+                // Шифруем чувствительные данные с уникальным IV
+                if (!string.IsNullOrEmpty(passportData))
+                {
+                    var encrypted = _encryptionService.EncryptToBase64WithIV(passportData);
+                    contact.EncryptedPassportData = System.Text.Encoding.UTF8.GetBytes(encrypted);
+                }
+
+                if (!string.IsNullOrEmpty(phoneNumber))
+                {
+                    var encrypted = _encryptionService.EncryptToBase64WithIV(phoneNumber);
+                    contact.EncryptedPhoneNumber = System.Text.Encoding.UTF8.GetBytes(encrypted);
+                }
+
+                if (!string.IsNullOrEmpty(email))
+                {
+                    var encrypted = _encryptionService.EncryptToBase64WithIV(email);
+                    contact.EncryptedEmail = System.Text.Encoding.UTF8.GetBytes(encrypted);
+                }
+
+                if (!string.IsNullOrEmpty(address))
+                {
+                    var encrypted = _encryptionService.EncryptToBase64WithIV(address);
+                    contact.EncryptedAddress = System.Text.Encoding.UTF8.GetBytes(encrypted);
+                }
+
+                contact.CreatedAt = DateTime.UtcNow;
+                contact.UpdatedAt = DateTime.UtcNow;
+
+                _context.Contacts.Add(contact);
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                _logger.LogInformation("Created contact: {TelegramUsername} (ID: {ContactId})",
+                    contact.TelegramUsername, contact.Id);
+                return contact;
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                _logger.LogError(ex, "Error creating contact {TelegramUsername}", contact.TelegramUsername);
+                return null;
+            }
+        }
+
+        public async Task<TeamContact?> CreateSimpleContactAsync(
+            string telegramUsername,
+            string? fullName = null,
+            string? contactType = null,
+            string? tags = null)
+        {
+            try
+            {
+                // Убираем @ если есть
+                var username = telegramUsername.StartsWith('@') ?
+                    telegramUsername.Substring(1) : telegramUsername;
+
+                // Проверяем уникальность (регистронезависимо)
+                var existingContact = await _context.Contacts
+                    .FirstOrDefaultAsync(c => c.TelegramUsername.ToLower() == username.ToLower());
+
+                if (existingContact != null)
+                {
+                    _logger.LogInformation("Contact {Username} already exists (ID: {ContactId})",
+                        username, existingContact.Id);
+                    return existingContact;
+                }
+
+                var contact = new TeamContact
+                {
+                    TelegramUsername = username,
+                    FullName = fullName,
+                    ContactType = contactType ?? "Доп",
+                    Tags = tags,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                _context.Contacts.Add(contact);
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("Created simple contact: {TelegramUsername} (ID: {ContactId})",
+                    username, contact.Id);
+                return contact;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating simple contact {TelegramUsername}", telegramUsername);
+                return null;
+            }
+        }
+
+        public async Task<TeamContact?> GetContactAsync(int contactId)
+        {
+            return await _context.Contacts.FindAsync(contactId);
+        }
+
+        public async Task<TeamContactWithDecryptedData?> GetContactWithDecryptedDataAsync(int contactId)
+        {
+            var contact = await _context.Contacts.FindAsync(contactId);
+            if (contact == null)
+            {
+                _logger.LogWarning("Contact {ContactId} not found", contactId);
+                return null;
+            }
+
+            try
+            {
+                var result = new TeamContactWithDecryptedData
+                {
+                    Contact = contact,
+                    PassportData = contact.EncryptedPassportData != null ?
+                        _encryptionService.DecryptFromBase64WithIV(
+                            System.Text.Encoding.UTF8.GetString(contact.EncryptedPassportData)) : null,
+                    PhoneNumber = contact.EncryptedPhoneNumber != null ?
+                        _encryptionService.DecryptFromBase64WithIV(
+                            System.Text.Encoding.UTF8.GetString(contact.EncryptedPhoneNumber)) : null,
+                    Email = contact.EncryptedEmail != null ?
+                        _encryptionService.DecryptFromBase64WithIV(
+                            System.Text.Encoding.UTF8.GetString(contact.EncryptedEmail)) : null,
+                    Address = contact.EncryptedAddress != null ?
+                        _encryptionService.DecryptFromBase64WithIV(
+                            System.Text.Encoding.UTF8.GetString(contact.EncryptedAddress)) : null
+                };
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error decrypting data for contact {ContactId}", contactId);
+                return null;
+            }
+        }
+
+        public async Task<string?> GetDecryptedPassportDataAsync(int contactId)
+        {
+            var contact = await _context.Contacts.FindAsync(contactId);
+            if (contact?.EncryptedPassportData == null)
+                return null;
+
+            try
+            {
+                var encryptedText = System.Text.Encoding.UTF8.GetString(contact.EncryptedPassportData);
+                return _encryptionService.DecryptFromBase64WithIV(encryptedText);
+            }
+            catch (CryptographicException ex)
+            {
+                _logger.LogError(ex, "Error decrypting passport data for contact {ContactId}", contactId);
+                return null;
+            }
+        }
+
+        public async Task<string?> GetDecryptedPhoneNumberAsync(int contactId)
+        {
+            var contact = await _context.Contacts.FindAsync(contactId);
+            if (contact?.EncryptedPhoneNumber == null)
+                return null;
+
+            try
+            {
+                var encryptedText = System.Text.Encoding.UTF8.GetString(contact.EncryptedPhoneNumber);
+                return _encryptionService.DecryptFromBase64WithIV(encryptedText);
+            }
+            catch (CryptographicException ex)
+            {
+                _logger.LogError(ex, "Error decrypting phone number for contact {ContactId}", contactId);
+                return null;
+            }
+        }
+
+        public async Task<string?> GetDecryptedEmailAsync(int contactId)
+        {
+            var contact = await _context.Contacts.FindAsync(contactId);
+            if (contact?.EncryptedEmail == null)
+                return null;
+
+            try
+            {
+                var encryptedText = System.Text.Encoding.UTF8.GetString(contact.EncryptedEmail);
+                return _encryptionService.DecryptFromBase64WithIV(encryptedText);
+            }
+            catch (CryptographicException ex)
+            {
+                _logger.LogError(ex, "Error decrypting email for contact {ContactId}", contactId);
+                return null;
+            }
+        }
+
+        public async Task<string?> GetDecryptedAddressAsync(int contactId)
+        {
+            var contact = await _context.Contacts.FindAsync(contactId);
+            if (contact?.EncryptedAddress == null)
+                return null;
+
+            try
+            {
+                var encryptedText = System.Text.Encoding.UTF8.GetString(contact.EncryptedAddress);
+                return _encryptionService.DecryptFromBase64WithIV(encryptedText);
+            }
+            catch (CryptographicException ex)
+            {
+                _logger.LogError(ex, "Error decrypting address for contact {ContactId}", contactId);
+                return null;
+            }
+        }
+
+        public async Task<List<TeamContact>> SearchContactsAsync(string searchTerm)
+        {
+            if (string.IsNullOrWhiteSpace(searchTerm))
+                return new List<TeamContact>();
+
+            var searchTermLower = searchTerm.ToLowerInvariant();
+
+            return await _context.Contacts
+                .Where(c =>
+                    c.TelegramUsername.ToLower().Contains(searchTermLower) ||
+                    (c.FullName != null && c.FullName.ToLower().Contains(searchTermLower)) ||
+                    (c.Nickname != null && c.Nickname.ToLower().Contains(searchTermLower)) ||
+                    (c.Tags != null && c.Tags.ToLower().Contains(searchTermLower)) ||
+                    (c.ContactType != null && c.ContactType.ToLower().Contains(searchTermLower)))
+                .OrderBy(c => c.TelegramUsername)
+                .Take(50)
+                .ToListAsync();
+        }
+
+        public async Task<PaginatedResult<TeamContact>> SearchContactsPaginatedAsync(
+            string searchTerm, int page = 1, int pageSize = 20)
+        {
+            if (string.IsNullOrWhiteSpace(searchTerm))
+                return new PaginatedResult<TeamContact>(new List<TeamContact>(), page, pageSize, 0);
+
+            var searchTermLower = searchTerm.ToLowerInvariant();
+
+            var query = _context.Contacts
+                .Where(c =>
+                    c.TelegramUsername.ToLower().Contains(searchTermLower) ||
+                    (c.FullName != null && c.FullName.ToLower().Contains(searchTermLower)) ||
+                    (c.Nickname != null && c.Nickname.ToLower().Contains(searchTermLower)) ||
+                    (c.Tags != null && c.Tags.ToLower().Contains(searchTermLower)) ||
+                    (c.ContactType != null && c.ContactType.ToLower().Contains(searchTermLower)));
+
+            var total = await query.CountAsync();
+            var contacts = await query
+                .OrderBy(c => c.TelegramUsername)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PaginatedResult<TeamContact>(contacts, page, pageSize, total);
+        }
+
+        public async Task<bool> UpdateContactAsync(TeamContact contact)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+                contact.UpdatedAt = DateTime.UtcNow;
+
+                // Используем Attach для оптимизации
+                var entry = _context.Attach(contact);
+                entry.State = EntityState.Modified;
+
+                // Помечаем измененные поля
+                entry.Property(x => x.UpdatedAt).IsModified = true;
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                _logger.LogInformation("Updated contact {ContactId}", contact.Id);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                _logger.LogError(ex, "Error updating contact {ContactId}", contact.Id);
+                return false;
+            }
+        }
+
+        public async Task<bool> UpdateContactEncryptedDataAsync(int contactId,
+            string? passportData = null,
+            string? phoneNumber = null,
+            string? email = null,
+            string? address = null)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+                var contact = await _context.Contacts.FindAsync(contactId);
+                if (contact == null)
+                {
+                    _logger.LogWarning("Contact {ContactId} not found for update", contactId);
+                    await transaction.RollbackAsync();
+                    return false;
+                }
+
+                contact.UpdatedAt = DateTime.UtcNow;
+
+                // Обновляем только переданные поля
+                if (passportData != null)
+                {
+                    var encrypted = _encryptionService.EncryptToBase64WithIV(passportData);
+                    contact.EncryptedPassportData = System.Text.Encoding.UTF8.GetBytes(encrypted);
+                }
+
+                if (phoneNumber != null)
+                {
+                    var encrypted = _encryptionService.EncryptToBase64WithIV(phoneNumber);
+                    contact.EncryptedPhoneNumber = System.Text.Encoding.UTF8.GetBytes(encrypted);
+                }
+
+                if (email != null)
+                {
+                    var encrypted = _encryptionService.EncryptToBase64WithIV(email);
+                    contact.EncryptedEmail = System.Text.Encoding.UTF8.GetBytes(encrypted);
+                }
+
+                if (address != null)
+                {
+                    var encrypted = _encryptionService.EncryptToBase64WithIV(address);
+                    contact.EncryptedAddress = System.Text.Encoding.UTF8.GetBytes(encrypted);
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                _logger.LogInformation("Updated encrypted data for contact {ContactId}", contactId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                _logger.LogError(ex, "Error updating encrypted data for contact {ContactId}", contactId);
+                return false;
+            }
+        }
+
+        public async Task<bool> DeleteContactAsync(int contactId)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+                var contact = await _context.Contacts.FindAsync(contactId);
+                if (contact == null)
+                {
+                    _logger.LogWarning("Contact {ContactId} not found for deletion", contactId);
+                    await transaction.RollbackAsync();
+                    return false;
+                }
+
+                _context.Contacts.Remove(contact);
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                _logger.LogInformation("Deleted contact {ContactId} ({TelegramUsername})",
+                    contactId, contact.TelegramUsername);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                _logger.LogError(ex, "Error deleting contact {ContactId}", contactId);
+                return false;
+            }
+        }
+
+        public async Task<List<TeamContact>> GetAllContactsAsync()
+        {
+            return await _context.Contacts
+                .OrderBy(c => c.TelegramUsername)
+                .ToListAsync();
+        }
+
+        public async Task<PaginatedResult<TeamContact>> GetAllContactsPaginatedAsync(int page = 1, int pageSize = 20)
+        {
+            var total = await _context.Contacts.CountAsync();
+            var contacts = await _context.Contacts
+                .OrderBy(c => c.TelegramUsername)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return new PaginatedResult<TeamContact>(contacts, page, pageSize, total);
+        }
+
+        public async Task<int> GetContactsCountAsync()
+        {
+            return await _context.Contacts.CountAsync();
+        }
+
+        public async Task<List<TeamContact>> GetContactsByTypeAsync(string contactType)
+        {
+            return await _context.Contacts
+                .Where(c => c.ContactType == contactType)
+                .OrderBy(c => c.TelegramUsername)
+                .ToListAsync();
+        }
+
+        public async Task<bool> ContactExistsAsync(string telegramUsername)
+        {
+            var username = telegramUsername.StartsWith('@') ?
+                telegramUsername.Substring(1) : telegramUsername;
+
+            return await _context.Contacts
+                .AnyAsync(c => c.TelegramUsername.ToLower() == username.ToLower());
+        }
+    }
+}
